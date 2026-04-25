@@ -4,6 +4,7 @@
 #include "app_task.h"
 #include "app_risk.h"
 #include "app_proto.h"
+#include "sensor_temp_humi.h"
 
 #define APP_LED_PIN                  GET_PIN(16, 5)
 
@@ -44,28 +45,42 @@ static rt_uint32_t app_now_ms(void)
     return (rt_uint32_t)((rt_tick_get() * 1000UL) / RT_TICK_PER_SECOND);
 }
 
-static void th_env_entry(void *parameter)
+
+
+    
+    static void th_env_entry(void *parameter)
 {
-    rt_int32_t base_temp = 2600;
-    rt_int32_t base_humi = 5200;
+    float temp = 0.0f;
+    float humi = 0.0f;
     rt_int32_t base_smoke = 25;
     rt_int32_t idx = 0;
     app_env_msg_t msg;
 
     RT_UNUSED(parameter);
 
+    if (sensor_temp_humi_init() != 0)
+    {
+        rt_kprintf("[env] sensor temp humi init failed\r\n");
+    }
+
     while (1)
     {
         msg.env.ts_ms = app_now_ms();
-        msg.env.temp_centi_c = base_temp + ((idx % 8) - 4) * 12;
-        msg.env.humi_centi_pct = base_humi + ((idx % 10) - 5) * 30;
-        msg.env.smoke_ppm = base_smoke + (idx % 5) * 3;
 
-        /* Inject a periodic abnormal sample to test risk flow */
-        if ((idx % 25) == 0)
+        if (sensor_temp_humi_read(&temp, &humi) == 0)
         {
-            msg.env.humi_centi_pct = 8200;
+            msg.env.temp_centi_c = (rt_int32_t)(temp * 100);
+            msg.env.humi_centi_pct = (rt_int32_t)(humi * 100);
         }
+        else
+        {
+            rt_kprintf("[env] read temp humi failed, use default value\r\n");
+
+            msg.env.temp_centi_c = 2600;
+            msg.env.humi_centi_pct = 5200;
+        }
+
+        msg.env.smoke_ppm = base_smoke + (idx % 5) * 3;
 
         if (rt_mq_send(g_mq_env, &msg, sizeof(msg)) != RT_EOK)
         {
@@ -76,7 +91,6 @@ static void th_env_entry(void *parameter)
         rt_thread_mdelay(1000);
     }
 }
-
 static void th_fusion_entry(void *parameter)
 {
     app_env_msg_t env_msg;
